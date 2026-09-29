@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="my">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>T-TOE Camera Tracker v0.3</title>
+<style>
+body{margin:0;background:#06111d;color:#eef7ff;font-family:Arial,sans-serif}
+header{padding:14px;background:#0b2339}h1{font-size:20px;margin:0 0 4px}.sub{font-size:12px;color:#a8d9f5}
+main{max-width:760px;margin:auto;padding:10px}.card{background:#10263b;border:1px solid #28506d;border-radius:14px;padding:12px;margin:9px 0}
+#stage{position:relative;background:#000;border-radius:12px;overflow:hidden}video{width:100%;display:block}
+canvas{position:absolute;inset:0;width:100%;height:100%}
+button{padding:11px 14px;border:0;border-radius:9px;margin:3px;background:#287fc2;color:white;font-weight:bold}
+button.stop{background:#8e3030}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat{background:#081725;border-radius:9px;padding:9px;font-size:13px}.v{color:#ffd65b;font-weight:bold}
+.small{font-size:12px;color:#b8cad8;line-height:1.5}
+</style>
+</head>
+<body>
+<header><h1>📱 T-TOE Camera Tracker v0.3</h1>
+<div class="sub">HTTPS camera prototype • harmless-object tracking • simulation only</div></header>
+<main>
+<div class="card">
+<div id="stage"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas></div>
+<button id="start">📷 Start Camera</button><button id="stop" class="stop">Stop</button>
+<p class="small">Camera permission requires HTTPS (or localhost). For testing, hold a bright red harmless object in view.</p>
+</div>
+<div class="card"><div class="grid">
+<div class="stat">Camera: <span id="cam" class="v">OFF</span></div>
+<div class="stat">Detection: <span id="det" class="v">—</span></div>
+<div class="stat">Confidence: <span id="conf" class="v">0%</span></div>
+<div class="stat">Motion: <span id="motion" class="v">—</span></div>
+<div class="stat">X: <span id="x" class="v">—</span></div>
+<div class="stat">Y: <span id="y" class="v">—</span></div>
+<div class="stat">T-TOE ΨD: <span id="psi" class="v">0.00</span></div>
+<div class="stat">Level: <span id="level" class="v">READY</span></div>
+</div></div>
+<div class="card small"><b>Model</b><br>ΨD = αEm + βPw + γIf<br>
+In v0.3 the inputs are normalized camera-motion values for demonstration. This is not a validated defense equation and does not control weapons or interception systems.</div>
+</main>
+<script>
+const v=document.getElementById('video'),c=document.getElementById('overlay'),ctx=c.getContext('2d');
+const w=document.createElement('canvas'),wx=w.getContext('2d');let stream=null,running=false,last=null;
+function set(id,val){document.getElementById(id).textContent=val}
+async function start(){
+ if(!window.isSecureContext && location.hostname!=='localhost' && location.hostname!=='127.0.0.1'){
+  alert('Camera သုံးရန် HTTPS website လိုအပ်ပါတယ်။ ဒီဖိုင်ကို HTTPS hosting ပေါ်တင်ပြီး ပြန်ဖွင့်ပါ။'); return;
+ }
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+  v.srcObject=stream;running=true;set('cam','ON');set('det','SEARCHING');requestAnimationFrame(scan);
+ }catch(e){alert('Camera permission မရပါ။ Browser Settings > Site permissions > Camera မှာ Allow လုပ်ပါ။')}
+}
+function stop(){running=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;set('cam','OFF');set('det','—');set('conf','0%');set('level','READY');ctx.clearRect(0,0,c.width,c.height)}
+function scan(){
+ if(!running||v.readyState<2){if(running)requestAnimationFrame(scan);return}
+ let W=v.videoWidth,H=v.videoHeight;if(!W||!H){requestAnimationFrame(scan);return}
+ if(c.width!==W||c.height!==H){c.width=W;c.height=H}
+ w.width=Math.min(640,W);w.height=Math.round(w.width*H/W);wx.drawImage(v,0,0,w.width,w.height);
+ let d=wx.getImageData(0,0,w.width,w.height).data,minX=w.width,maxX=0,minY=w.height,maxY=0,n=0;
+ for(let y=0;y<w.height;y+=3)for(let x=0;x<w.width;x+=3){let i=(y*w.width+x)*4,r=d[i],g=d[i+1],b=d[i+2];
+  if(r>145&&r>g*1.45&&r>b*1.35&&r-g>45){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);n++}
+ }
+ ctx.clearRect(0,0,W,H);
+ if(n>25){
+  let sx=W/w.width,sy=H/w.height,bx=minX*sx,by=minY*sy,bw=(maxX-minX)*sx,bh=(maxY-minY)*sy,cx=(minX+maxX)/2*sx,cy=(minY+maxY)/2*sy;
+  ctx.strokeStyle='#ffd04a';ctx.lineWidth=5;ctx.strokeRect(bx,by,bw,bh);ctx.fillStyle='#ffd04a';ctx.font=Math.max(18,W/45)+'px Arial';ctx.fillText('TARGET',bx,Math.max(25,by-8));
+  let now=performance.now(),dt=last?(now-last.t)/1000:0,px=last?Math.hypot(cx-last.x,cy-last.y)/Math.max(dt,.001):0;last={x:cx,y:cy,t:now};
+  let p=Math.min(1,px/100);set('det','DETECTED');set('conf',Math.min(99,Math.round(45+n/8))+'%');set('x',Math.round(cx)+' px');set('y',Math.round(cy)+' px');set('motion',px<20?'LOW':px<80?'MEDIUM':'HIGH');set('psi',p.toFixed(2));set('level',p<.35?'LOW':p<.7?'MEDIUM':'HIGH');
+ }else{set('det','SEARCHING');set('conf','0%');set('motion','—');set('psi','0.00');set('level','READY');last=null}
+ requestAnimationFrame(scan)
+}
+document.getElementById('start').onclick=start;document.getElementById('stop').onclick=stop;
+</script>
+</body></html>
